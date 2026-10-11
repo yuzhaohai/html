@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>家族族谱生成器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.0/lucide.min.js"></script>
+    <style>
+        :root {
+            --connector-color: #cbd5e1;
+            --connector-width: 2px;
+        }
+
+        body {
+            background-color: #f8fafc;
+            user-select: none;
+        }
+
+        /* 画布背景网格 */
+        #canvas-wrapper {
+            background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
+            background-size: 20px 20px;
+            cursor: grab;
+        }
+
+        #canvas-wrapper:active {
+            cursor: grabbing;
+        }
+
+        /* 族谱连接线核心逻辑 */
+        .tree-container ul {
+            padding-top: 20px;
+            position: relative;
+            display: flex;
+            justify-content: center;
+        }
+
+        .tree-container li {
+            float: left;
+            text-align: center;
+            list-style-type: none;
+            position: relative;
+            padding: 20px 10px 0 10px;
+        }
+
+        /* 节点上方的垂直线 */
+        .tree-container li::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 50%;
+            border-top: var(--connector-width) solid var(--connector-color);
+            width: 50%;
+            height: 20px;
+        }
+
+        .tree-container li::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            border-top: var(--connector-width) solid var(--connector-color);
+            width: 50%;
+            height: 20px;
+        }
+
+        /* 移除边缘节点的横线 */
+        .tree-container li:only-child::after, .tree-container li:only-child::before {
+            display: none;
+        }
+
+        .tree-container li:only-child {
+            padding-top: 0;
+        }
+
+        .tree-container li:first-child::before, .tree-container li:last-child::after {
+            border: 0 none;
+        }
+
+        /* 节点下方的垂直引线 */
+        .tree-container li:last-child::before {
+            border-right: var(--connector-width) solid var(--connector-color);
+            border-radius: 0 5px 0 0;
+        }
+
+        .tree-container li:first-child::after {
+            border-left: var(--connector-width) solid var(--connector-color);
+            border-radius: 5px 0 0 0;
+        }
+
+        /* 子节点容器顶部的竖线 */
+        .tree-container ul ul::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            border-left: var(--connector-width) solid var(--connector-color);
+            width: 0;
+            height: 20px;
+        }
+
+        /* 夫妻连接线 */
+        .partner-connector {
+            width: 30px;
+            height: var(--connector-width);
+            background: var(--connector-color);
+            position: relative;
+        }
+
+        .heart-icon {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #f8fafc;
+            padding: 2px;
+            color: #fb7185;
+        }
+
+        .node-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .node-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 动画 */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-pop {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- 顶部导航栏 -->
+    <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between z-50">
+        <div class="flex items-center gap-3">
+            <div class="bg-indigo-600 p-2 rounded-lg text-white">
+                <i data-lucide="users"></i>
+            </div>
+            <h1 class="text-xl font-bold text-slate-800">家族族谱生成器</h1>
+        </div>
+
+        <div class="flex items-center gap-4">
+            <div class="flex items-center bg-slate-100 rounded-lg p-1 border border-slate-200">
+                <button onclick="changeScale(-0.1)" class="p-2 hover:bg-white rounded-md text-slate-600"><i data-lucide="zoom-out"></i></button>
+                <span id="zoom-level" class="w-16 text-center text-sm font-medium text-slate-600">100%</span>
+                <button onclick="changeScale(0.1)" class="p-2 hover:bg-white rounded-md text-slate-600"><i data-lucide="zoom-in"></i></button>
+            </div>
+            <div class="h-8 w-px bg-slate-200"></div>
+            <button onclick="exportJSON()" class="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-sm font-medium"><i data-lucide="download"></i> 导出</button>
+            <button onclick="document.getElementById('import-input').click()" class="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-sm text-sm font-medium"><i data-lucide="upload"></i> 导入</button>
+            <input type="file" id="import-input" class="hidden" accept=".json" onchange="importJSON(event)">
+        </div>
+    </header>
+
+    <!-- 可视化画布 -->
+    <main id="canvas-wrapper" class="flex-1 overflow-auto relative">
+        <div id="tree-root" class="tree-container min-w-fit min-h-full p-20 flex items-start justify-center origin-top">
+            <!-- 树节点将在这里动态生成 -->
+        </div>
+    </main>
+
+    <!-- 编辑模态框 -->
+    <div id="modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-[100] p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-pop">
+            <div class="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+                <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2"><i data-lucide="edit-3"></i> 编辑成员信息</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">主成员姓名</label>
+                        <input type="text" id="edit-name" class="w-full px-4 py-2 rounded-lg border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-200">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">配偶姓名</label>
+                        <input type="text" id="edit-partner" class="w-full px-4 py-2 rounded-lg border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-200">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">称谓/角色</label>
+                        <input type="text" id="edit-title" class="w-full px-4 py-2 rounded-lg border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-200">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-1">主成员性别</label>
+                        <select id="edit-gender" class="w-full px-4 py-2 rounded-lg border border-slate-200 outline-none bg-white">
+                            <option value="male">男性</option>
+                            <option value="female">女性</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="pt-4 flex flex-col gap-3">
+                    <button onclick="saveNode()" class="w-full py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 shadow-md active:scale-95 transition-all">保存更改</button>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button onclick="addNewChild()" class="flex items-center justify-center gap-2 py-2 bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-200 hover:bg-emerald-100"><i data-lucide="plus"></i> 添加后代</button>
+                        <button id="btn-delete" onclick="deleteNode()" class="flex items-center justify-center gap-2 py-2 bg-rose-50 text-rose-600 rounded-lg border border-rose-200 hover:bg-rose-100"><i data-lucide="trash-2"></i> 删除节点</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部状态栏 -->
+    <div class="fixed bottom-6 right-6 bg-white/90 backdrop-blur px-4 py-2 rounded-full shadow-lg border border-slate-200 text-xs text-slate-500 flex items-center gap-2">
+        <i data-lucide="move" class="w-3 h-3"></i> 按住拖拽背景 • 点击卡片编辑成员
+    </div>
+
+    <script>
+        // --- 核心数据 ---
+        let familyData = {
+            id: 'root',
+            name: '王祖父',
+            title: '家族始祖',
+            gender: 'male',
+            partner: '李祖母',
+            children: [
+                {
+                    id: 'c1', name: '王大伯', title: '长子', gender: 'male', partner: '张大妈',
+                    children: [{ id: 'c11', name: '王堂兄', title: '长孙', gender: 'male', children: [] }]
+                },
+                {
+                    id: 'c2', name: '王父亲', title: '次子', gender: 'male', partner: '陈母亲',
+                    children: [
+                        { id: 'c21', name: '王小明', title: '我', gender: 'male', children: [] },
+                        { id: 'c22', name: '王小妹', title: '妹妹', gender: 'female', children: [] }
+                    ]
+                }
+            ]
+        };
+
+        let scale = 1;
+        let selectedNodeId = null;
+
+        // 安全调用 lucide 图标初始化的函数
+        function refreshIcons() {
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                lucide.createIcons();
+            } else {
+                // 如果库还没加载完，100ms后重试一次
+                setTimeout(refreshIcons, 100);
+            }
+        }
+
+        // --- 渲染逻辑 ---
+        function renderTree() {
+            const rootElement = document.getElementById('tree-root');
+            if (!rootElement) return;
+            rootElement.innerHTML = '';
+            rootElement.appendChild(createNodeHTML(familyData));
+            refreshIcons();
+        }
+
+        function createNodeHTML(node) {
+            const li = document.createElement('li');
+            
+            const nodeWrapper = document.createElement('div');
+            nodeWrapper.className = "flex flex-col items-center";
+            
+            const familyUnit = document.createElement('div');
+            familyUnit.className = "flex items-center gap-1 relative z-10";
+
+            familyUnit.appendChild(createCard(node.name, node.title, node.gender, node.id));
+
+            if (node.partner) {
+                const connector = document.createElement('div');
+                connector.className = "partner-connector";
+                connector.innerHTML = `<div class="heart-icon"><i data-lucide="heart" class="w-3 h-3 fill-current"></i></div>`;
+                familyUnit.appendChild(connector);
+
+                const partnerGender = node.gender === 'male' ? 'female' : 'male';
+                familyUnit.appendChild(createCard(node.partner, '配偶', partnerGender, node.id));
+            }
+
+            nodeWrapper.appendChild(familyUnit);
+            li.appendChild(nodeWrapper);
+
+            if (node.children && node.children.length > 0) {
+                const ul = document.createElement('ul');
+                node.children.forEach(child => {
+                    ul.appendChild(createNodeHTML(child));
+                });
+                li.appendChild(ul);
+            }
+
+            return li;
+        }
+
+        function createCard(name, title, gender, id) {
+            const isMale = gender === 'male';
+            const card = document.createElement('div');
+            card.className = `node-card w-36 p-3 rounded-xl border-2 shadow-md flex flex-col items-center gap-1 cursor-pointer ${
+                isMale ? 'bg-slate-50 border-slate-200' : 'bg-rose-50 border-rose-200'
+            }`;
+            card.onclick = () => openModal(id);
+
+            const iconBg = isMale ? 'bg-blue-100 text-blue-500' : 'bg-rose-100 text-rose-500';
+            const titleBg = isMale ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700';
+
+            card.innerHTML = `
+                <div class="w-10 h-10 rounded-full flex items-center justify-center bg-white border border-inherit ${iconBg}">
+                    <i data-lucide="users" class="w-5 h-5"></i>
+                </div>
+                <div class="text-center w-full">
+                    <div class="font-bold text-slate-800 text-sm truncate px-1">${name || '未命名'}</div>
+                    <div class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${titleBg}">${title}</div>
+                </div>
+            `;
+            return card;
+        }
+
+        // --- 交互逻辑 ---
+        function openModal(id) {
+            selectedNodeId = id;
+            const node = findNodeById(familyData, id);
+            if (!node) return;
+            document.getElementById('edit-name').value = node.name;
+            document.getElementById('edit-partner').value = node.partner || '';
+            document.getElementById('edit-title').value = node.title;
+            document.getElementById('edit-gender').value = node.gender;
+            
+            document.getElementById('btn-delete').style.display = id === 'root' ? 'none' : 'flex';
+            document.getElementById('modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+        }
+
+        function saveNode() {
+            const node = findNodeById(familyData, selectedNodeId);
+            if (node) {
+                node.name = document.getElementById('edit-name').value;
+                node.partner = document.getElementById('edit-partner').value;
+                node.title = document.getElementById('edit-title').value;
+                node.gender = document.getElementById('edit-gender').value;
+                renderTree();
+            }
+            closeModal();
+        }
+
+        function addNewChild() {
+            const node = findNodeById(familyData, selectedNodeId);
+            if (node) {
+                const newChild = {
+                    id: 'node_' + Date.now(),
+                    name: '新成员',
+                    title: '后代',
+                    gender: 'male',
+                    children: []
+                };
+                if (!node.children) node.children = [];
+                node.children.push(newChild);
+                renderTree();
+            }
+            closeModal();
+        }
+
+        function deleteNode() {
+            if (confirm('确定要删除该成员及其所有后代吗？')) {
+                deleteFromData(familyData, selectedNodeId);
+                renderTree();
+                closeModal();
+            }
+        }
+
+        function findNodeById(root, id) {
+            if (root.id === id) return root;
+            if (root.children) {
+                for (let child of root.children) {
+                    const found = findNodeById(child, id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        function deleteFromData(root, id) {
+            if (root.children) {
+                const index = root.children.findIndex(c => c.id === id);
+                if (index !== -1) {
+                    root.children.splice(index, 1);
+                    return true;
+                }
+                for (let child of root.children) {
+                    if (deleteFromData(child, id)) return true;
+                }
+            }
+            return false;
+        }
+
+        function changeScale(delta) {
+            scale = Math.max(0.2, Math.min(2, scale + delta));
+            const zoomLabel = document.getElementById('zoom-level');
+            if (zoomLabel) zoomLabel.innerText = Math.round(scale * 100) + '%';
+            const container = document.querySelector('.tree-container');
+            if (container) container.style.transform = `scale(${scale})`;
+        }
+
+        // 画布拖拽
+        const wrapper = document.getElementById('canvas-wrapper');
+        let isDragging = false;
+        let startX, startY, scrollLeft, scrollTop;
+
+        if (wrapper) {
+            wrapper.addEventListener('mousedown', (e) => {
+                if (e.target.closest('.node-card')) return;
+                isDragging = true;
+                startX = e.pageX - wrapper.offsetLeft;
+                startY = e.pageY - wrapper.offsetTop;
+                scrollLeft = wrapper.scrollLeft;
+                scrollTop = wrapper.scrollTop;
+            });
+
+            window.addEventListener('mouseup', () => isDragging = false);
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                e.preventDefault();
+                const x = e.pageX - wrapper.offsetLeft;
+                const y = e.pageY - wrapper.offsetTop;
+                wrapper.scrollLeft = scrollLeft - (x - startX);
+                wrapper.scrollTop = scrollTop - (y - startY);
+            });
+        }
+
+        function exportJSON() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(familyData));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "family_tree.json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+        }
+
+        function importJSON(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    familyData = JSON.parse(e.target.result);
+                    renderTree();
+                } catch (err) {
+                    alert('文件格式有误');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // 页面初始化
+        window.addEventListener('load', () => {
+            renderTree();
+            refreshIcons();
+        });
+    </script>
+</body>
+</html>
